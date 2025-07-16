@@ -1,12 +1,16 @@
 package com.synechron.sandboxmanagement.service;
 
+import com.azure.identity.DefaultAzureCredential;
 import io.kubernetes.client.openapi.ApiClient;
 import io.kubernetes.client.openapi.ApiException;
 import io.kubernetes.client.openapi.Configuration;
 import io.kubernetes.client.openapi.apis.CoreV1Api;
 import io.kubernetes.client.openapi.models.*;
 import io.kubernetes.client.util.Config;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.util.List;
@@ -16,12 +20,45 @@ import java.util.HashMap;
 @Service
 public class KubernetesService {
     
+    private static final Logger logger = LoggerFactory.getLogger(KubernetesService.class);
     private final CoreV1Api coreV1Api;
+    private final DefaultAzureCredential azureCredential;
     
-    public KubernetesService() throws IOException {
-        ApiClient client = Config.defaultClient();
+    @Autowired
+    public KubernetesService(DefaultAzureCredential azureCredential) throws IOException {
+        this.azureCredential = azureCredential;
+        
+        ApiClient client;
+        try {
+            client = createAzureAuthenticatedClient();
+            logger.info("Kubernetes service initialized with Azure default credentials");
+        } catch (Exception e) {
+            logger.warn("Failed to initialize with Azure credentials, falling back to default config: {}", e.getMessage());
+            client = Config.defaultClient();
+        }
+        
         Configuration.setDefaultApiClient(client);
         this.coreV1Api = new CoreV1Api();
+    }
+    
+    private ApiClient createAzureAuthenticatedClient() throws IOException {
+        try {
+            ApiClient client = Config.defaultClient();
+            
+            String token = azureCredential.getToken(
+                new com.azure.core.credential.TokenRequestContext()
+                    .addScopes("https://management.azure.com/.default")
+            ).block().getToken();
+            
+            client.setApiKeyPrefix("Bearer");
+            client.setApiKey(token);
+            
+            logger.info("Successfully configured Kubernetes client with Azure token");
+            return client;
+        } catch (Exception e) {
+            logger.error("Failed to get Azure token for Kubernetes authentication: {}", e.getMessage());
+            throw new IOException("Failed to authenticate with Azure", e);
+        }
     }
     
     public List<V1Pod> listPodsInNamespace(String namespace) throws ApiException {
