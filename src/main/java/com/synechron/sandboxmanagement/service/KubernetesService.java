@@ -1,13 +1,12 @@
 package com.synechron.sandboxmanagement.service;
 
-import com.azure.identity.DefaultAzureCredential;
 import io.kubernetes.client.openapi.ApiClient;
 import io.kubernetes.client.openapi.ApiException;
 import io.kubernetes.client.openapi.Configuration;
 import io.kubernetes.client.openapi.apis.CoreV1Api;
 import io.kubernetes.client.openapi.models.*;
 import io.kubernetes.client.util.Config;
-import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -22,83 +21,128 @@ public class KubernetesService {
     
     private static final Logger logger = LoggerFactory.getLogger(KubernetesService.class);
     private final CoreV1Api coreV1Api;
-    private final DefaultAzureCredential azureCredential;
     
-    @Autowired
-    public KubernetesService(DefaultAzureCredential azureCredential) throws IOException {
-        this.azureCredential = azureCredential;
-        
-        ApiClient client;
+    @Value("${kubernetes.config-path:~/.kube/config}")
+    private String kubeConfigPath;
+    
+    public KubernetesService() throws IOException {
         try {
-            client = createAzureAuthenticatedClient();
-            logger.info("Kubernetes service initialized with Azure default credentials");
+            ApiClient client = createKubeConfigClient();
+            Configuration.setDefaultApiClient(client);
+            this.coreV1Api = new CoreV1Api();
+            logger.info("Kubernetes service initialized with kubeconfig authentication");
         } catch (Exception e) {
-            logger.warn("Failed to initialize with Azure credentials, falling back to default config: {}", e.getMessage());
-            client = Config.defaultClient();
+            logger.error("Failed to initialize Kubernetes client with kubeconfig: {}", e.getMessage());
+            throw new IOException("Failed to authenticate with Kubernetes using kubeconfig", e);
         }
-        
-        Configuration.setDefaultApiClient(client);
-        this.coreV1Api = new CoreV1Api();
     }
     
-    private ApiClient createAzureAuthenticatedClient() throws IOException {
+    private ApiClient createKubeConfigClient() throws IOException {
         try {
             ApiClient client = Config.defaultClient();
-            
-            String token = azureCredential.getToken(
-                new com.azure.core.credential.TokenRequestContext()
-                    .addScopes("https://management.azure.com/.default")
-            ).block().getToken();
-            
-            client.setApiKeyPrefix("Bearer");
-            client.setApiKey(token);
-            
-            logger.info("Successfully configured Kubernetes client with Azure token");
+            logger.info("Successfully configured Kubernetes client with kubeconfig from: {}", kubeConfigPath);
             return client;
         } catch (Exception e) {
-            logger.error("Failed to get Azure token for Kubernetes authentication: {}", e.getMessage());
-            throw new IOException("Failed to authenticate with Azure", e);
+            logger.error("Failed to load kubeconfig from path: {}", kubeConfigPath);
+            throw new IOException("Failed to load kubeconfig", e);
         }
     }
     
     public List<V1Pod> listPodsInNamespace(String namespace) throws ApiException {
-        V1PodList podList = coreV1Api.listNamespacedPod(
-            namespace, 
-            null, null, null, null, null, null, null, null, null, null
-        );
-        return podList.getItems();
+        try {
+            V1PodList podList = coreV1Api.listNamespacedPod(
+                namespace, 
+                null, null, null, null, null, null, null, null, null, null
+            );
+            logger.debug("Successfully listed {} pods in namespace: {}", podList.getItems().size(), namespace);
+            return podList.getItems();
+        } catch (ApiException e) {
+            logger.error("Failed to list pods in namespace '{}': {} - {}", namespace, e.getCode(), e.getResponseBody());
+            if (e.getCode() == 403) {
+                logger.warn("Access denied to namespace '{}'. Check kubeconfig permissions.", namespace);
+            }
+            throw e;
+        }
     }
     
     public List<V1Service> listServicesInNamespace(String namespace) throws ApiException {
-        V1ServiceList serviceList = coreV1Api.listNamespacedService(
-            namespace,
-            null, null, null, null, null, null, null, null, null, null
-        );
-        return serviceList.getItems();
+        try {
+            V1ServiceList serviceList = coreV1Api.listNamespacedService(
+                namespace,
+                null, null, null, null, null, null, null, null, null, null
+            );
+            logger.debug("Successfully listed {} services in namespace: {}", serviceList.getItems().size(), namespace);
+            return serviceList.getItems();
+        } catch (ApiException e) {
+            logger.error("Failed to list services in namespace '{}': {} - {}", namespace, e.getCode(), e.getResponseBody());
+            if (e.getCode() == 403) {
+                logger.warn("Access denied to namespace '{}'. Check kubeconfig permissions.", namespace);
+            }
+            throw e;
+        }
     }
     
     public String getPodLogs(String podName, String namespace) throws ApiException {
-        return coreV1Api.readNamespacedPodLog(
-            podName,
-            namespace,
-            null, null, null, null, null, null, null, null, null
-        );
+        try {
+            String logs = coreV1Api.readNamespacedPodLog(
+                podName,
+                namespace,
+                null, null, null, null, null, null, null, null, null
+            );
+            logger.debug("Successfully retrieved logs for pod '{}' in namespace: {}", podName, namespace);
+            return logs;
+        } catch (ApiException e) {
+            logger.error("Failed to get logs for pod '{}' in namespace '{}': {} - {}", podName, namespace, e.getCode(), e.getResponseBody());
+            if (e.getCode() == 403) {
+                logger.warn("Access denied to pod '{}' in namespace '{}'. Check kubeconfig permissions.", podName, namespace);
+            }
+            throw e;
+        }
     }
     
     public V1Pod getPodDescription(String podName, String namespace) throws ApiException {
-        return coreV1Api.readNamespacedPod(podName, namespace, null);
+        try {
+            V1Pod pod = coreV1Api.readNamespacedPod(podName, namespace, null);
+            logger.debug("Successfully retrieved description for pod '{}' in namespace: {}", podName, namespace);
+            return pod;
+        } catch (ApiException e) {
+            logger.error("Failed to get description for pod '{}' in namespace '{}': {} - {}", podName, namespace, e.getCode(), e.getResponseBody());
+            if (e.getCode() == 403) {
+                logger.warn("Access denied to pod '{}' in namespace '{}'. Check kubeconfig permissions.", podName, namespace);
+            }
+            throw e;
+        }
     }
     
     public void restartPod(String podName, String namespace) throws ApiException {
-        coreV1Api.deleteNamespacedPod(
-            podName,
-            namespace,
-            null, null, null, null, null, null
-        );
+        try {
+            coreV1Api.deleteNamespacedPod(
+                podName,
+                namespace,
+                null, null, null, null, null, null
+            );
+            logger.info("Successfully deleted pod '{}' in namespace '{}' for restart", podName, namespace);
+        } catch (ApiException e) {
+            logger.error("Failed to delete pod '{}' in namespace '{}': {} - {}", podName, namespace, e.getCode(), e.getResponseBody());
+            if (e.getCode() == 403) {
+                logger.warn("Access denied to delete pod '{}' in namespace '{}'. Check kubeconfig permissions.", podName, namespace);
+            }
+            throw e;
+        }
     }
     
     public V1Service getServiceDescription(String serviceName, String namespace) throws ApiException {
-        return coreV1Api.readNamespacedService(serviceName, namespace, null);
+        try {
+            V1Service service = coreV1Api.readNamespacedService(serviceName, namespace, null);
+            logger.debug("Successfully retrieved description for service '{}' in namespace: {}", serviceName, namespace);
+            return service;
+        } catch (ApiException e) {
+            logger.error("Failed to get description for service '{}' in namespace '{}': {} - {}", serviceName, namespace, e.getCode(), e.getResponseBody());
+            if (e.getCode() == 403) {
+                logger.warn("Access denied to service '{}' in namespace '{}'. Check kubeconfig permissions.", serviceName, namespace);
+            }
+            throw e;
+        }
     }
     
     public Map<String, Object> getPodInfo(String podName, String namespace) throws ApiException {
