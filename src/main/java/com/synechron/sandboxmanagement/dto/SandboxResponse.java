@@ -1,5 +1,6 @@
 package com.synechron.sandboxmanagement.dto;
 
+import com.fasterxml.jackson.annotation.JsonFormat;
 import java.time.LocalDateTime;
 import java.util.List;
 
@@ -13,7 +14,9 @@ public class SandboxResponse {
     private String namespace;
     private List<String> dnsList;
     private String gitRepositoryUrl;
+    @JsonFormat(pattern = "yyyy-MM-dd'T'HH:mm:ss")
     private LocalDateTime createdAt;
+    @JsonFormat(pattern = "yyyy-MM-dd'T'HH:mm:ss")
     private LocalDateTime updatedAt;
     
     public Long getId() {

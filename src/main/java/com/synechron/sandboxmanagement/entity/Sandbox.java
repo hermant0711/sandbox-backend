@@ -1,6 +1,7 @@
 package com.synechron.sandboxmanagement.entity;
 
 import jakarta.persistence.*;
+import com.fasterxml.jackson.annotation.JsonFormat;
 import java.time.LocalDateTime;
 import java.util.List;
 
@@ -36,9 +37,11 @@ public class Sandbox {
     private String gitRepositoryUrl;
     
     @Column(name = "created_at")
+    @JsonFormat(pattern = "yyyy-MM-dd'T'HH:mm:ss")
     private LocalDateTime createdAt;
     
     @Column(name = "updated_at")
+    @JsonFormat(pattern = "yyyy-MM-dd'T'HH:mm:ss")
     private LocalDateTime updatedAt;
     
     @PrePersist
